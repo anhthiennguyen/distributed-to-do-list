@@ -87,6 +87,24 @@
   color: #ccc;
 }
 
+.download-btn {
+  border: none;
+  background: none;
+  cursor: pointer;
+  color: #ccc;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
+  border-radius: 4px;
+  transition: color 0.15s;
+  flex-shrink: 0;
+}
+
+.download-btn:hover {
+  color: #1a1a1a;
+}
+
 .task-list {
   flex: 1;
   overflow-y: auto;
@@ -246,4 +264,245 @@
   padding: 60px;
   color: #bbb;
   font-size: 14px;
+}
+
+/* ── Category Tabs ── */
+.cat-tabs-wrap {
+  border-bottom: 1px solid #f0f0f0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.cat-tabs-wrap::-webkit-scrollbar { display: none; }
+
+.cat-tabs {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  padding: 0 16px;
+  min-width: max-content;
+}
+
+.cat-tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 12px 14px;
+  border: none;
+  border-bottom: 2px solid transparent;
+  background: none;
+  cursor: pointer;
+  font-size: 14px;
+  font-family: inherit;
+  color: #999;
+  white-space: nowrap;
+  transition: color 0.15s, border-color 0.15s;
+  margin-bottom: -1px;
+}
+
+.cat-tab:hover { color: #1a1a1a; }
+
+.cat-tab.active {
+  color: #1a1a1a;
+  border-bottom-color: #1a1a1a;
+  font-weight: 500;
+}
+
+.cat-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.cat-tab.droppable {
+  transition: background 0.15s, color 0.15s;
+}
+
+.cat-tab.drop-over {
+  background: #f5f5f5;
+  color: #1a1a1a;
+  border-radius: 6px 6px 0 0;
+}
+
+.cat-tab-wrap {
+  display: flex;
+  align-items: center;
+  position: relative;
+}
+
+.cat-delete-tab-btn {
+  border: none;
+  background: none;
+  cursor: pointer;
+  color: #bbb;
+  font-size: 16px;
+  line-height: 1;
+  padding: 0 4px;
+  margin-left: -8px;
+  transition: color 0.15s;
+}
+
+.cat-delete-tab-btn:hover { color: #ff4444; }
+
+.task-cat-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.cat-add-btn {
+  color: #bbb;
+  font-size: 13px;
+}
+.cat-add-btn svg {
+  width: 10px;
+  height: 10px;
+}
+.cat-add-btn:hover { color: #1a1a1a; }
+
+.cat-add-form {
+  display: flex;
+  align-items: center;
+  padding: 6px 0;
+}
+
+.cat-add-input {
+  border: none;
+  border-bottom: 1px solid #ddd;
+  outline: none;
+  font-size: 14px;
+  font-family: inherit;
+  color: #1a1a1a;
+  background: transparent;
+  width: 130px;
+  padding: 2px 4px;
+}
+
+
+/* ── End drop zone (append to root list / uncategorize) ── */
+.end-drop-zone {
+  height: 48px;
+  margin: 4px 24px;
+  border-radius: 8px;
+  border: 2px dashed transparent;
+  transition: border-color 0.15s;
+}
+.end-drop-zone.end-drop-active {
+  border-color: #ddd;
+}
+
+/* ── Category Sections ── */
+.cat-section-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 20px 24px 6px;
+  cursor: grab;
+}
+
+.cat-section-header:active {
+  cursor: grabbing;
+}
+
+.cat-section-header.cat-dragging {
+  opacity: 0.4;
+}
+
+.cat-section-header.cat-drag-over {
+  border-top: 2px solid #1a1a1a;
+  padding-top: 18px;
+}
+
+.cat-drag-handle {
+  border: none;
+  background: none;
+  cursor: grab;
+  color: #ccc;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 0.15s;
+  padding: 0;
+  flex-shrink: 0;
+  font-size: 14px;
+  line-height: 1;
+}
+
+.cat-section-header:hover .cat-drag-handle {
+  opacity: 1;
+}
+
+.cat-section-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: #555;
+  flex: 1;
+}
+
+.cat-count {
+  font-size: 12px;
+  color: #bbb;
+}
+
+/* ── Context Menu ── */
+.context-menu {
+  position: fixed;
+  z-index: 1000;
+  background: #fff;
+  border: 1px solid #e8e8e8;
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.1);
+  padding: 8px;
+  min-width: 200px;
+}
+
+.context-input {
+  width: 100%;
+  border: none;
+  outline: none;
+  font-size: 14px;
+  font-family: inherit;
+  color: #1a1a1a;
+  padding: 6px 8px;
+  background: #f7f7f7;
+  border-radius: 4px;
+}
+
+.context-input::placeholder { color: #bbb; }
+
+.context-delete-btn {
+  width: 100%;
+  border: none;
+  background: none;
+  cursor: pointer;
+  font-size: 14px;
+  font-family: inherit;
+  color: #1a1a1a;
+  padding: 8px 10px;
+  text-align: left;
+  border-radius: 4px;
+  transition: background 0.1s;
+}
+.context-delete-btn:hover { background: #f5f5f5; }
+
+/* ── Drag states ── */
+.task-item.dragging {
+  opacity: 0.4;
+}
+
+.task-item.drag-over {
+  border-top: 2px solid #1a1a1a;
+}
+
+.cat-section-header.drop-over-header {
+  background: #f5f5f5;
+}
+
+.dragging-overlay {
+  background: #fff;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.12);
+  border-radius: 8px;
+  cursor: grabbing;
 }

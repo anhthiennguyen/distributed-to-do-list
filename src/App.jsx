@@ -1,16 +1,8 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import {
   collection, addDoc, deleteDoc, updateDoc,
   doc, onSnapshot, query, orderBy, serverTimestamp, writeBatch,
 } from 'firebase/firestore'
-import {
-  DndContext, closestCenter, PointerSensor, TouchSensor,
-  useSensor, useSensors,
-} from '@dnd-kit/core'
-import {
-  SortableContext, useSortable, verticalListSortingStrategy, arrayMove,
-} from '@dnd-kit/sortable'
-import { CSS } from '@dnd-kit/utilities'
 import { db } from './firebase'
 import './App.css'
 
@@ -19,100 +11,202 @@ const CheckIcon = () => (
     <polyline points="2,6 5,9 10,3" />
   </svg>
 )
-
 const PlusIcon = () => (
   <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
-    <line x1="6" y1="1" x2="6" y2="11" />
-    <line x1="1" y1="6" x2="11" y2="6" />
+    <line x1="6" y1="1" x2="6" y2="11" /><line x1="1" y1="6" x2="11" y2="6" />
   </svg>
 )
-
 const TrashIcon = () => (
   <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
     <polyline points="1,3 13,3" />
     <path d="M5,3V2a1,1,0,0,1,1-1h2a1,1,0,0,1,1,1v1" />
     <path d="M2,3l1,9a1,1,0,0,0,1,1h6a1,1,0,0,0,1-1l1-9" />
-    <line x1="5.5" y1="6" x2="5.5" y2="10" />
-    <line x1="8.5" y1="6" x2="8.5" y2="10" />
+    <line x1="5.5" y1="6" x2="5.5" y2="10" /><line x1="8.5" y1="6" x2="8.5" y2="10" />
+  </svg>
+)
+const UploadIcon = () => (
+  <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" width="14" height="14">
+    <path d="M7 9V1M4 4l3-3 3 3" /><path d="M2 11h10" />
+  </svg>
+)
+const DownloadIcon = () => (
+  <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" width="14" height="14">
+    <path d="M7 1v8M4 6l3 3 3-3" /><path d="M2 11h10" />
   </svg>
 )
 
-const DragIcon = () => (
-  <svg viewBox="0 0 14 14" fill="currentColor" width="14" height="14">
-    <circle cx="5" cy="3.5" r="1.2" />
-    <circle cx="9" cy="3.5" r="1.2" />
-    <circle cx="5" cy="7" r="1.2" />
-    <circle cx="9" cy="7" r="1.2" />
-    <circle cx="5" cy="10.5" r="1.2" />
-    <circle cx="9" cy="10.5" r="1.2" />
-  </svg>
-)
+const COLORS = ['#6366f1','#10b981','#f59e0b','#ef4444','#8b5cf6','#06b6d4','#f97316','#ec4899']
+const END_DROP_ID = '__end__'
 
 export default function App() {
   const [tasks, setTasks] = useState([])
-  const [input, setInput] = useState('')
+  const [categories, setCategories] = useState([])
   const [loading, setLoading] = useState(true)
+  const [input, setInput] = useState('')
+  const [dragId, setDragId] = useState(null)       // task being dragged
+  const [dragCatId, setDragCatId] = useState(null) // category being dragged
+  const [dragOverId, setDragOverId] = useState(null) // hovered item id (task, category, or END_DROP_ID)
+  const [contextMenu, setContextMenu] = useState(null)
+  const [newCatName, setNewCatName] = useState('')
+  const catInputRef = useRef(null)
 
-  const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
-    useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 5 } })
-  )
+  // Unified root list: uncategorized tasks + categories sorted by the same `order` field
+  const rootItems = [
+    ...tasks.filter(t => !t.categoryId).map(t => ({ ...t, _type: 'task' })),
+    ...categories.map(c => ({ ...c, _type: 'category' })),
+  ].sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
 
   useEffect(() => {
-    const q = query(collection(db, 'tasks'), orderBy('order', 'asc'))
-    const unsub = onSnapshot(q, (snap) => {
-      setTasks(snap.docs.map(d => ({ id: d.id, ...d.data() })))
-      setLoading(false)
-    })
-    return unsub
+    const u1 = onSnapshot(query(collection(db, 'categories'), orderBy('order', 'asc')),
+      snap => setCategories(snap.docs.map(d => ({ id: d.id, ...d.data() }))))
+    const u2 = onSnapshot(query(collection(db, 'tasks'), orderBy('order', 'asc')),
+      snap => { setTasks(snap.docs.map(d => ({ id: d.id, ...d.data() }))); setLoading(false) })
+    return () => { u1(); u2() }
   }, [])
+
+  useEffect(() => { if (contextMenu) catInputRef.current?.focus() }, [contextMenu])
+
+  useEffect(() => {
+    function close() { setContextMenu(null) }
+    window.addEventListener('click', close)
+    return () => window.removeEventListener('click', close)
+  }, [])
+
+  function handleContextMenu(e) {
+    e.preventDefault()
+    const catEl = e.target.closest('[data-cat-id]')
+    setContextMenu({ x: e.clientX, y: e.clientY, catId: catEl?.dataset?.catId ?? null })
+    setNewCatName('')
+  }
 
   async function addTask(e) {
     e.preventDefault()
-    const text = input.trim()
-    if (!text) return
+    const text = input.trim(); if (!text) return
     setInput('')
-    const maxOrder = tasks.length > 0 ? Math.max(...tasks.map(t => t.order ?? 0)) : 0
-    await addDoc(collection(db, 'tasks'), {
-      text,
-      done: false,
-      order: maxOrder + 1,
-      createdAt: serverTimestamp(),
-    })
+    const maxOrder = rootItems.length > 0 ? Math.max(...rootItems.map(r => r.order ?? 0)) : 0
+    await addDoc(collection(db, 'tasks'), { text, done: false, order: maxOrder + 1, categoryId: null, createdAt: serverTimestamp() })
   }
 
   async function toggleTask(task) {
     await updateDoc(doc(db, 'tasks', task.id), { done: !task.done })
   }
 
-  async function deleteTask(id) {
-    await deleteDoc(doc(db, 'tasks', id))
+  async function deleteTask(id) { await deleteDoc(doc(db, 'tasks', id)) }
+
+  function downloadJSON() {
+    const data = tasks.map(t => ({ text: t.text, done: t.done, category: categories.find(c => c.id === t.categoryId)?.name ?? null, createdAt: t.createdAt?.toDate?.()?.toISOString() ?? null }))
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a'); a.href = url; a.download = `tasks-${new Date().toISOString().slice(0,10)}.json`; a.click(); URL.revokeObjectURL(url)
   }
 
-  async function handleDragEnd(event) {
-    const { active, over } = event
-    if (!over || active.id === over.id) return
-
-    const oldIndex = tasks.findIndex(t => t.id === active.id)
-    const newIndex = tasks.findIndex(t => t.id === over.id)
-    const reordered = arrayMove(tasks, oldIndex, newIndex)
-
-    setTasks(reordered)
-
+  async function uploadJSON(e) {
+    const file = e.target.files[0]; if (!file) return; e.target.value = ''
+    let data; try { data = JSON.parse(await file.text()) } catch { alert('Invalid JSON'); return }
+    if (!Array.isArray(data)) { alert('JSON must be an array'); return }
     const batch = writeBatch(db)
-    reordered.forEach((task, i) => {
-      batch.update(doc(db, 'tasks', task.id), { order: i })
+    const maxOrder = rootItems.length > 0 ? Math.max(...rootItems.map(r => r.order ?? 0)) : 0
+    data.forEach((item, i) => {
+      if (!item.text) return
+      batch.set(doc(collection(db, 'tasks')), { text: item.text, done: item.done ?? false, categoryId: categories.find(c => c.name === item.category)?.id ?? null, order: maxOrder + i + 1, createdAt: serverTimestamp() })
     })
     await batch.commit()
   }
 
-  const pending = tasks.filter(t => !t.done)
-  const completed = tasks.filter(t => t.done)
-  const total = tasks.length
-  const progress = total === 0 ? 0 : Math.round((completed.length / total) * 100)
+  async function addCategory(e) {
+    e.preventDefault()
+    const name = newCatName.trim(); if (!name) { setContextMenu(null); return }
+    const maxOrder = rootItems.length > 0 ? Math.max(...rootItems.map(r => r.order ?? 0)) : 0
+    await addDoc(collection(db, 'categories'), { name, color: COLORS[categories.length % COLORS.length], order: maxOrder + 1, createdAt: serverTimestamp() })
+    setNewCatName(''); setContextMenu(null)
+  }
+
+  async function deleteCategory(catId) {
+    await deleteDoc(doc(db, 'categories', catId))
+    const batch = writeBatch(db)
+    tasks.filter(t => t.categoryId === catId).forEach(t => batch.update(doc(db, 'tasks', t.id), { categoryId: null }))
+    await batch.commit()
+    setContextMenu(null)
+  }
+
+  // ── Drag handlers ──
+
+  function onDragEnd() { setDragId(null); setDragCatId(null); setDragOverId(null) }
+  function onDragOver(e, id) { e.preventDefault(); e.stopPropagation(); setDragOverId(id) }
+  function onDragLeave() { setDragOverId(null) }
+
+  // Drop on a root-level item (uncategorized task or category header).
+  // Task → category header: goes INTO the category.
+  // Everything else: reorder in the unified root list.
+  async function onDropOnRootItem(e, targetItem) {
+    e.stopPropagation()
+    const activeDragId = dragId || dragCatId
+    if (!activeDragId || activeDragId === targetItem.id) { setDragOverId(null); return }
+
+    if (dragId && targetItem._type === 'category') {
+      // File into folder
+      const catTasks = tasks.filter(t => t.categoryId === targetItem.id)
+      const maxOrder = catTasks.length > 0 ? Math.max(...catTasks.map(t => t.order ?? 0)) : 0
+      await updateDoc(doc(db, 'tasks', dragId), { categoryId: targetItem.id, order: maxOrder + 1 })
+      setDragId(null); setDragOverId(null); return
+    }
+
+    // Reorder: build new root list with dragged item inserted before target
+    const draggedTask = dragId ? tasks.find(t => t.id === dragId) : null
+    const draggedCat = dragCatId ? categories.find(c => c.id === dragCatId) : null
+    const draggedAsRoot = draggedTask
+      ? { ...draggedTask, _type: 'task', categoryId: null }
+      : { ...draggedCat, _type: 'category' }
+
+    const withoutDragged = rootItems.filter(r => r.id !== activeDragId)
+    const targetIdx = withoutDragged.findIndex(r => r.id === targetItem.id)
+    withoutDragged.splice(targetIdx, 0, draggedAsRoot)
+
+    const batch = writeBatch(db)
+    withoutDragged.forEach((r, i) => {
+      if (r._type === 'task') batch.update(doc(db, 'tasks', r.id), { order: i, categoryId: null })
+      else batch.update(doc(db, 'categories', r.id), { order: i })
+    })
+    await batch.commit()
+    setDragId(null); setDragCatId(null); setDragOverId(null)
+  }
+
+  // Drop on a task inside a category: move dragged task into that category, before the target.
+  async function onDropOnCatTask(e, targetTask) {
+    e.stopPropagation()
+    if (!dragId || dragId === targetTask.id) { setDragOverId(null); return }
+    const dragged = tasks.find(t => t.id === dragId)
+    if (!dragged) return
+
+    const newCatId = targetTask.categoryId
+    const catTasks = tasks.filter(t => t.categoryId === newCatId && t.id !== dragId)
+    const targetIdx = catTasks.findIndex(t => t.id === targetTask.id)
+    catTasks.splice(targetIdx, 0, { ...dragged, categoryId: newCatId })
+
+    const batch = writeBatch(db)
+    catTasks.forEach((t, i) => batch.update(doc(db, 'tasks', t.id), { order: i, categoryId: newCatId }))
+    await batch.commit()
+    setDragId(null); setDragOverId(null)
+  }
+
+  // Drop on the bottom end zone: append to end of root list (uncategorizes a task or moves category last).
+  async function onDropOnEnd(e) {
+    e.stopPropagation()
+    const activeDragId = dragId || dragCatId
+    if (!activeDragId) { setDragOverId(null); return }
+    const maxOrder = rootItems.length > 0 ? Math.max(...rootItems.map(r => r.order ?? 0)) : 0
+    if (dragId) {
+      await updateDoc(doc(db, 'tasks', dragId), { categoryId: null, order: maxOrder + 1 })
+    } else {
+      await updateDoc(doc(db, 'categories', dragCatId), { order: maxOrder + 1 })
+    }
+    setDragId(null); setDragCatId(null); setDragOverId(null)
+  }
+
+  const progress = tasks.length === 0 ? 0 : Math.round((tasks.filter(t => t.done).length / tasks.length) * 100)
 
   return (
-    <div className="app">
+    <div className="app" onContextMenu={handleContextMenu}>
       <div className="progress-bar">
         <div className="progress-fill" style={{ width: `${progress}%` }} />
       </div>
@@ -120,86 +214,126 @@ export default function App() {
       <div className="inner">
         <div className="add-task-container">
           <form className="add-task-form" onSubmit={addTask}>
-            <button type="submit" className="add-btn-circle" aria-label="Add task">
-              <PlusIcon />
-            </button>
-            <input
-              className="task-input"
-              type="text"
-              placeholder="Add a task..."
-              value={input}
-              onChange={e => setInput(e.target.value)}
-              autoFocus
-            />
+            <button type="submit" className="add-btn-circle"><PlusIcon /></button>
+            <input className="task-input" type="text" placeholder="Add a task..." value={input} onChange={e => setInput(e.target.value)} autoFocus />
+            <button type="button" className="download-btn" onClick={downloadJSON}><DownloadIcon /></button>
+            <label className="download-btn"><UploadIcon /><input type="file" accept=".json" onChange={uploadJSON} style={{ display: 'none' }} /></label>
           </form>
         </div>
 
-        <div className="task-list">
-          {loading ? (
-            <div className="loading">Loading...</div>
-          ) : tasks.length === 0 ? null : (
-            <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
-              <SortableContext items={tasks.map(t => t.id)} strategy={verticalListSortingStrategy}>
-                {pending.length > 0 && (
-                  <>
-                    {completed.length > 0 && <div className="section-label">To Do</div>}
-                    {pending.map(task => (
-                      <SortableTaskItem key={task.id} task={task} onToggle={toggleTask} onDelete={deleteTask} />
-                    ))}
-                  </>
-                )}
-                {completed.length > 0 && (
-                  <>
-                    <div className="section-label">Completed</div>
-                    {completed.map(task => (
-                      <SortableTaskItem key={task.id} task={task} onToggle={toggleTask} onDelete={deleteTask} />
-                    ))}
-                  </>
-                )}
-              </SortableContext>
-            </DndContext>
+        {loading ? <div className="loading">Loading...</div> : (
+          <div className="task-list">
+            {rootItems.map(item => {
+              if (item._type === 'task') {
+                return (
+                  <TaskItem key={item.id} task={item}
+                    dragging={dragId === item.id}
+                    dragOver={dragOverId === item.id}
+                    onDragStart={(e) => { e.stopPropagation(); setDragId(item.id) }}
+                    onDragEnd={onDragEnd}
+                    onDragOver={(e) => onDragOver(e, item.id)}
+                    onDragLeave={onDragLeave}
+                    onDrop={(e) => onDropOnRootItem(e, item)}
+                    onToggle={toggleTask} onDelete={deleteTask}
+                  />
+                )
+              }
+              const cat = item
+              const catTasks = tasks.filter(t => t.categoryId === cat.id)
+              const pending = catTasks.filter(t => !t.done)
+              const done = catTasks.filter(t => t.done)
+              return (
+                <div key={cat.id}>
+                  <div
+                    draggable
+                    onDragStart={(e) => { e.stopPropagation(); setDragCatId(cat.id) }}
+                    onDragEnd={onDragEnd}
+                    className={`cat-section-header ${dragCatId === cat.id ? 'cat-dragging' : ''} ${dragOverId === cat.id && dragCatId ? 'cat-drag-over' : ''} ${dragOverId === cat.id && dragId ? 'drop-over-header' : ''}`}
+                    data-cat-id={cat.id}
+                    onDragOver={(e) => onDragOver(e, cat.id)}
+                    onDragLeave={onDragLeave}
+                    onDrop={(e) => onDropOnRootItem(e, cat)}
+                  >
+                    <button className="cat-drag-handle" aria-label="Drag">⠿</button>
+                    <span className="cat-dot" style={{ background: cat.color }} />
+                    <span className="cat-section-name">{cat.name}</span>
+                    <span className="cat-count">{catTasks.length}</span>
+                  </div>
+                  {pending.map(task => (
+                    <TaskItem key={task.id} task={task} indent
+                      dragging={dragId === task.id}
+                      dragOver={dragOverId === task.id}
+                      onDragStart={(e) => { e.stopPropagation(); setDragId(task.id) }}
+                      onDragEnd={onDragEnd}
+                      onDragOver={(e) => onDragOver(e, task.id)}
+                      onDragLeave={onDragLeave}
+                      onDrop={(e) => onDropOnCatTask(e, task)}
+                      onToggle={toggleTask} onDelete={deleteTask}
+                    />
+                  ))}
+                  {done.length > 0 && <div className="section-label" style={{ paddingLeft: 40 }}>Completed</div>}
+                  {done.map(task => (
+                    <TaskItem key={task.id} task={task} indent
+                      dragging={dragId === task.id}
+                      dragOver={dragOverId === task.id}
+                      onDragStart={(e) => { e.stopPropagation(); setDragId(task.id) }}
+                      onDragEnd={onDragEnd}
+                      onDragOver={(e) => onDragOver(e, task.id)}
+                      onDragLeave={onDragLeave}
+                      onDrop={(e) => onDropOnCatTask(e, task)}
+                      onToggle={toggleTask} onDelete={deleteTask}
+                    />
+                  ))}
+                </div>
+              )
+            })}
+
+            {/* Bottom drop zone — moves item to end of root list, uncategorizes tasks */}
+            {(dragId || dragCatId) && (
+              <div
+                className={`end-drop-zone ${dragOverId === END_DROP_ID ? 'end-drop-active' : ''}`}
+                onDragOver={(e) => { e.preventDefault(); setDragOverId(END_DROP_ID) }}
+                onDragLeave={onDragLeave}
+                onDrop={onDropOnEnd}
+              />
+            )}
+          </div>
+        )}
+      </div>
+
+      {contextMenu && (
+        <div className="context-menu" style={{ top: contextMenu.y, left: contextMenu.x }} onClick={e => e.stopPropagation()}>
+          {contextMenu.catId ? (
+            <button className="context-delete-btn" onClick={() => deleteCategory(contextMenu.catId)}>
+              Delete category
+            </button>
+          ) : (
+            <form onSubmit={addCategory}>
+              <input ref={catInputRef} className="context-input" value={newCatName} onChange={e => setNewCatName(e.target.value)} placeholder="New category name..." maxLength={24} />
+            </form>
           )}
         </div>
-      </div>
+      )}
     </div>
   )
 }
 
-function SortableTaskItem({ task, onToggle, onDelete }) {
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: task.id })
-
-  const style = {
-    transform: CSS.Transform.toString(transform),
-    transition,
-    opacity: isDragging ? 0.5 : 1,
-    zIndex: isDragging ? 10 : 'auto',
-  }
-
+function TaskItem({ task, dragging, dragOver, onDragStart, onDragEnd, onDragOver, onDragLeave, onDrop, onToggle, onDelete, indent }) {
   return (
-    <div ref={setNodeRef} style={style} className="task-item">
-      <button
-        className="drag-handle"
-        {...attributes}
-        {...listeners}
-        aria-label="Drag to reorder"
-      >
-        <DragIcon />
-      </button>
-      <button
-        className={`checkbox ${task.done ? 'checked' : ''}`}
-        onClick={() => onToggle(task)}
-        aria-label={task.done ? 'Mark incomplete' : 'Mark complete'}
-      >
-        <CheckIcon />
-      </button>
+    <div
+      draggable
+      onDragStart={onDragStart}
+      onDragEnd={onDragEnd}
+      onDragOver={onDragOver}
+      onDragLeave={onDragLeave}
+      onDrop={onDrop}
+      className={`task-item ${dragOver ? 'drag-over' : ''} ${dragging ? 'dragging' : ''}`}
+      style={{ paddingLeft: indent ? 40 : undefined }}
+    >
+      <button className="drag-handle" aria-label="Drag">⠿</button>
+      <button className={`checkbox ${task.done ? 'checked' : ''}`} onClick={() => onToggle(task)}><CheckIcon /></button>
       <span className={`task-text ${task.done ? 'done' : ''}`}>{task.text}</span>
-      <button
-        className="delete-btn"
-        onClick={() => onDelete(task.id)}
-        aria-label="Delete task"
-      >
-        <TrashIcon />
-      </button>
+      <button className="delete-btn" onClick={() => onDelete(task.id)}><TrashIcon /></button>
     </div>
   )
 }
