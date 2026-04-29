@@ -46,8 +46,11 @@ export default function App() {
   const [dragId, setDragId] = useState(null)       // task being dragged
   const [dragCatId, setDragCatId] = useState(null) // category being dragged
   const [dragOverId, setDragOverId] = useState(null) // hovered item id (task, category, or END_DROP_ID)
+  const [editing, setEditing] = useState(null) // { id, type: 'task'|'category' }
   const [contextMenu, setContextMenu] = useState(null)
   const [newCatName, setNewCatName] = useState('')
+  const [colorPickerCatId, setColorPickerCatId] = useState(null)
+  const [colorPickerValue, setColorPickerValue] = useState('#000000')
   const catInputRef = useRef(null)
 
   // Unified root list: uncategorized tasks + categories sorted by the same `order` field
@@ -119,6 +122,23 @@ export default function App() {
     const maxOrder = rootItems.length > 0 ? Math.max(...rootItems.map(r => r.order ?? 0)) : 0
     await addDoc(collection(db, 'categories'), { name, color: COLORS[categories.length % COLORS.length], order: maxOrder + 1, createdAt: serverTimestamp() })
     setNewCatName(''); setContextMenu(null)
+  }
+
+  async function changeCategoryColor(catId, color) {
+    await updateDoc(doc(db, 'categories', catId), { color })
+    setColorPickerCatId(null)
+  }
+
+  async function renameTask(id, value) {
+    const trimmed = value.trim()
+    if (trimmed) await updateDoc(doc(db, 'tasks', id), { text: trimmed })
+    setEditing(null)
+  }
+
+  async function renameCategory(id, value) {
+    const trimmed = value.trim()
+    if (trimmed) await updateDoc(doc(db, 'categories', id), { name: trimmed })
+    setEditing(null)
   }
 
   async function deleteCategory(catId) {
@@ -229,12 +249,15 @@ export default function App() {
                   <TaskItem key={item.id} task={item}
                     dragging={dragId === item.id}
                     dragOver={dragOverId === item.id}
+                    isEditing={editing?.id === item.id}
                     onDragStart={(e) => { e.stopPropagation(); setDragId(item.id) }}
                     onDragEnd={onDragEnd}
                     onDragOver={(e) => onDragOver(e, item.id)}
                     onDragLeave={onDragLeave}
                     onDrop={(e) => onDropOnRootItem(e, item)}
                     onToggle={toggleTask} onDelete={deleteTask}
+                    onStartEdit={() => setEditing({ id: item.id, type: 'task' })}
+                    onCommitEdit={(val) => renameTask(item.id, val)}
                   />
                 )
               }
@@ -245,7 +268,7 @@ export default function App() {
               return (
                 <div key={cat.id}>
                   <div
-                    draggable
+                    draggable={editing?.id !== cat.id && colorPickerCatId !== cat.id}
                     onDragStart={(e) => { e.stopPropagation(); setDragCatId(cat.id) }}
                     onDragEnd={onDragEnd}
                     className={`cat-section-header ${dragCatId === cat.id ? 'cat-dragging' : ''} ${dragOverId === cat.id && dragCatId ? 'cat-drag-over' : ''} ${dragOverId === cat.id && dragId ? 'drop-over-header' : ''}`}
@@ -255,20 +278,50 @@ export default function App() {
                     onDrop={(e) => onDropOnRootItem(e, cat)}
                   >
                     <button className="cat-drag-handle" aria-label="Drag">⠿</button>
-                    <span className="cat-dot" style={{ background: cat.color }} />
-                    <span className="cat-section-name">{cat.name}</span>
+                    {colorPickerCatId === cat.id ? (
+                      <span className="cat-color-picker-ui" draggable={false} onClick={e => e.stopPropagation()}>
+                        <input type="color" className="cat-color-swatch-input"
+                          value={colorPickerValue}
+                          onChange={e => setColorPickerValue(e.target.value)}
+                        />
+                        <button className="cat-color-confirm" onClick={() => changeCategoryColor(cat.id, colorPickerValue)}>✓</button>
+                      </span>
+                    ) : (
+                      <span className="cat-dot" style={{ background: cat.color }}
+                        onDoubleClick={e => { e.stopPropagation(); setColorPickerCatId(cat.id); setColorPickerValue(cat.color) }}
+                      />
+                    )}
+                    {editing?.id === cat.id ? (
+                      <input
+                        className="cat-name-input"
+                        defaultValue={cat.name}
+                        autoFocus
+                        onFocus={e => e.target.select()}
+                        onBlur={e => renameCategory(cat.id, e.target.value)}
+                        onKeyDown={e => {
+                          if (e.key === 'Enter') { e.preventDefault(); e.target.blur() }
+                          if (e.key === 'Escape') { setEditing(null) }
+                        }}
+                        onClick={e => e.stopPropagation()}
+                      />
+                    ) : (
+                      <span className="cat-section-name" onDoubleClick={() => setEditing({ id: cat.id, type: 'category' })}>{cat.name}</span>
+                    )}
                     <span className="cat-count">{catTasks.length}</span>
                   </div>
                   {pending.map(task => (
                     <TaskItem key={task.id} task={task} indent
                       dragging={dragId === task.id}
                       dragOver={dragOverId === task.id}
+                      isEditing={editing?.id === task.id}
                       onDragStart={(e) => { e.stopPropagation(); setDragId(task.id) }}
                       onDragEnd={onDragEnd}
                       onDragOver={(e) => onDragOver(e, task.id)}
                       onDragLeave={onDragLeave}
                       onDrop={(e) => onDropOnCatTask(e, task)}
                       onToggle={toggleTask} onDelete={deleteTask}
+                      onStartEdit={() => setEditing({ id: task.id, type: 'task' })}
+                      onCommitEdit={(val) => renameTask(task.id, val)}
                     />
                   ))}
                   {done.length > 0 && <div className="section-label" style={{ paddingLeft: 40 }}>Completed</div>}
@@ -276,12 +329,15 @@ export default function App() {
                     <TaskItem key={task.id} task={task} indent
                       dragging={dragId === task.id}
                       dragOver={dragOverId === task.id}
+                      isEditing={editing?.id === task.id}
                       onDragStart={(e) => { e.stopPropagation(); setDragId(task.id) }}
                       onDragEnd={onDragEnd}
                       onDragOver={(e) => onDragOver(e, task.id)}
                       onDragLeave={onDragLeave}
                       onDrop={(e) => onDropOnCatTask(e, task)}
                       onToggle={toggleTask} onDelete={deleteTask}
+                      onStartEdit={() => setEditing({ id: task.id, type: 'task' })}
+                      onCommitEdit={(val) => renameTask(task.id, val)}
                     />
                   ))}
                 </div>
@@ -318,10 +374,10 @@ export default function App() {
   )
 }
 
-function TaskItem({ task, dragging, dragOver, onDragStart, onDragEnd, onDragOver, onDragLeave, onDrop, onToggle, onDelete, indent }) {
+function TaskItem({ task, dragging, dragOver, isEditing, onDragStart, onDragEnd, onDragOver, onDragLeave, onDrop, onToggle, onDelete, onStartEdit, onCommitEdit, indent }) {
   return (
     <div
-      draggable
+      draggable={!isEditing}
       onDragStart={onDragStart}
       onDragEnd={onDragEnd}
       onDragOver={onDragOver}
@@ -332,7 +388,21 @@ function TaskItem({ task, dragging, dragOver, onDragStart, onDragEnd, onDragOver
     >
       <button className="drag-handle" aria-label="Drag">⠿</button>
       <button className={`checkbox ${task.done ? 'checked' : ''}`} onClick={() => onToggle(task)}><CheckIcon /></button>
-      <span className={`task-text ${task.done ? 'done' : ''}`}>{task.text}</span>
+      {isEditing ? (
+        <input
+          className="task-text-input"
+          defaultValue={task.text}
+          autoFocus
+          onFocus={e => e.target.select()}
+          onBlur={e => onCommitEdit(e.target.value)}
+          onKeyDown={e => {
+            if (e.key === 'Enter') { e.preventDefault(); e.target.blur() }
+            if (e.key === 'Escape') onCommitEdit(task.text)
+          }}
+        />
+      ) : (
+        <span className={`task-text ${task.done ? 'done' : ''}`} onDoubleClick={onStartEdit}>{task.text}</span>
+      )}
       <button className="delete-btn" onClick={() => onDelete(task.id)}><TrashIcon /></button>
     </div>
   )
